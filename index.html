@@ -115,6 +115,22 @@
   .panel-title { font-family: var(--font-display); font-size: 17px; font-weight: 700; margin: 0 0 16px; }
 
   /* ---- Overview table ---- */
+  .report-filter {
+    display: flex; align-items: end; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;
+  }
+  .report-filter .field { margin-bottom: 0; }
+  .report-filter .field input { min-width: 150px; }
+  .report-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .report-stat-card { border-radius: 16px; padding: 14px 16px; }
+  .report-stat-card .rlbl { font-size: 12px; color: var(--ink-light); margin-bottom: 4px; }
+  .report-stat-card .rnum { font-family: var(--font-display); font-size: 22px; font-weight: 700; }
+  .report-stat-card .rsub { font-size: 12px; color: var(--ink-light); margin-top: 2px; }
+  .report-stat-card.mint { background: var(--mint-bg); } .report-stat-card.mint .rnum { color: var(--mint-text); }
+  .report-stat-card.coral { background: var(--coral-bg); } .report-stat-card.coral .rnum { color: var(--coral-text); }
+  .report-stat-card.purple { background: var(--purple-bg); } .report-stat-card.purple .rnum { color: var(--purple-text); }
+  .report-stat-card.blue { background: var(--blue-bg); } .report-stat-card.blue .rnum { color: var(--blue-text); }
+  .report-stat-card.warn { background: var(--yellow-bg); } .report-stat-card.warn .rnum { color: var(--yellow-text); }
+
   .toolbar-row {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
     flex-wrap: wrap; margin-bottom: 14px;
@@ -306,6 +322,8 @@
     searchQuery: '',
     sortField: null,
     sortDir: 'asc',
+    reportFrom: firstDayOfMonthStr(),
+    reportTo: todayStr(),
     editingId: null,
     toast: null,
   };
@@ -315,6 +333,10 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
   function todayStr(){ return new Date().toISOString().slice(0,10); }
+  function firstDayOfMonthStr(){
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  }
   function fmtDate(d){
     try {
       const dt = new Date(d + 'T00:00:00');
@@ -530,47 +552,25 @@
     } catch(e){ showToast('ส่งออก Excel ไม่สำเร็จ', 'warn'); }
   }
 
-  function exportPdf(){
-    const items = computeVisibleItems();
-    if (items.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
-
-    const rowsHtml = items.map(i => {
-      const low = i.qty <= i.minQty;
-      const value = i.qty * (i.price || 0);
-      return '<tr>' +
-        '<td>' + escapeHtml(i.code || '-') + '</td>' +
-        '<td>' + escapeHtml(i.name) + '</td>' +
-        '<td>' + escapeHtml(i.unit) + '</td>' +
-        '<td class="num">' + fmtMoney(i.price) + '</td>' +
-        '<td class="num">' + i.qty + '</td>' +
-        '<td class="num">' + fmtMoney(value) + '</td>' +
-        '<td>' + (low ? 'ใกล้หมด' : 'ปกติ') + '</td>' +
-      '</tr>';
-    }).join('');
-    const totalValue = items.reduce((s,i) => s + i.qty * (i.price || 0), 0);
-
+  function printReportHtml(bodyHtml){
     const html =
-      '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>รายงานคงเหลือ</title>' +
+      '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>รายงาน</title>' +
       '<style>' +
         "@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');" +
         "body{ font-family:'Sarabun',sans-serif; padding:28px; color:#26343A; }" +
         'h1{ font-size:19px; margin:0 0 4px; }' +
-        '.meta{ font-size:12px; color:#777; margin-bottom:18px; }' +
-        'table{ width:100%; border-collapse:collapse; font-size:12.5px; }' +
+        '.meta{ font-size:12px; color:#777; margin-bottom:16px; }' +
+        'table{ width:100%; border-collapse:collapse; font-size:12.5px; margin-bottom:20px; }' +
         'th,td{ border:1px solid #ddd; padding:7px 9px; text-align:left; }' +
         'th{ background:#F1EEFC; }' +
         'td.num, th.num{ text-align:right; }' +
         'tfoot td{ font-weight:700; background:#FAF9FF; }' +
+        '.stat-row{ display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }' +
+        '.stat-box{ border:1px solid #ddd; border-radius:10px; padding:10px 16px; min-width:140px; }' +
+        '.stat-box .l{ font-size:11px; color:#777; margin-bottom:2px; }' +
+        '.stat-box .v{ font-size:16px; font-weight:700; }' +
         '@media print{ body{ padding:0 16px; } }' +
-      '</style></head><body>' +
-        '<h1>รายงานคงเหลือวัสดุอุปกรณ์สำนักงาน</h1>' +
-        '<div class="meta">วันที่ออกรายงาน: ' + fmtDate(todayStr()) + ' · จำนวน ' + items.length + ' รายการ</div>' +
-        '<table><thead><tr><th>รหัส</th><th>ชื่อวัสดุ</th><th>หน่วยนับ</th><th class="num">ราคา/หน่วย</th>' +
-        '<th class="num">คงเหลือ</th><th class="num">มูลค่ารวม</th><th>สถานะ</th></tr></thead>' +
-        '<tbody>' + rowsHtml + '</tbody>' +
-        '<tfoot><tr><td colspan="5" style="text-align:right">มูลค่ารวมทั้งหมด</td><td class="num">฿' + fmtMoney(totalValue) + '</td><td></td></tr></tfoot>' +
-        '</table>' +
-      '</body></html>';
+      '</style></head><body>' + bodyHtml + '</body></html>';
 
     let iframe = document.getElementById('sr-print-frame');
     if (!iframe) {
@@ -591,6 +591,183 @@
     setTimeout(doPrint, 1000);
     showToast('เปิดหน้าต่างพิมพ์ — เลือก "บันทึกเป็น PDF" ได้เลย');
   }
+
+  function exportPdf(){
+    const items = computeVisibleItems();
+    if (items.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
+
+    const rowsHtml = items.map(i => {
+      const low = i.qty <= i.minQty;
+      const value = i.qty * (i.price || 0);
+      return '<tr>' +
+        '<td>' + escapeHtml(i.code || '-') + '</td>' +
+        '<td>' + escapeHtml(i.name) + '</td>' +
+        '<td>' + escapeHtml(i.unit) + '</td>' +
+        '<td class="num">' + fmtMoney(i.price) + '</td>' +
+        '<td class="num">' + i.qty + '</td>' +
+        '<td class="num">' + fmtMoney(value) + '</td>' +
+        '<td>' + (low ? 'ใกล้หมด' : 'ปกติ') + '</td>' +
+      '</tr>';
+    }).join('');
+    const totalValue = items.reduce((s,i) => s + i.qty * (i.price || 0), 0);
+
+    const bodyHtml =
+      '<h1>รายงานคงเหลือวัสดุอุปกรณ์สำนักงาน</h1>' +
+      '<div class="meta">วันที่ออกรายงาน: ' + fmtDate(todayStr()) + ' · จำนวน ' + items.length + ' รายการ</div>' +
+      '<table><thead><tr><th>รหัส</th><th>ชื่อวัสดุ</th><th>หน่วยนับ</th><th class="num">ราคา/หน่วย</th>' +
+      '<th class="num">คงเหลือ</th><th class="num">มูลค่ารวม</th><th>สถานะ</th></tr></thead>' +
+      '<tbody>' + rowsHtml + '</tbody>' +
+      '<tfoot><tr><td colspan="5" style="text-align:right">มูลค่ารวมทั้งหมด</td><td class="num">฿' + fmtMoney(totalValue) + '</td><td></td></tr></tfoot>' +
+      '</table>';
+
+    printReportHtml(bodyHtml);
+  }
+
+  // ---------- report dashboard ----------
+
+  function inRange(dateStr, from, to){
+    if (from && dateStr < from) return false;
+    if (to && dateStr > to) return false;
+    return true;
+  }
+
+  function computeReportData(from, to){
+    const asOfDate = to || todayStr();
+    const perItem = state.items.map(it => {
+      let receivedQty = 0, receivedValue = 0, issuedQty = 0, issuedValue = 0, balanceQty = 0;
+      state.transactions.forEach(t => {
+        if (t.itemId !== it.id) return;
+        if (t.date <= asOfDate) balanceQty += (t.type === 'in' ? t.qty : -t.qty);
+        if (inRange(t.date, from, to)) {
+          if (t.type === 'in') { receivedQty += t.qty; receivedValue += t.qty * (it.price || 0); }
+          else { issuedQty += t.qty; issuedValue += t.qty * (it.price || 0); }
+        }
+      });
+      balanceQty = Math.max(0, balanceQty);
+      return { item: it, receivedQty, receivedValue, issuedQty, issuedValue, balanceQty, balanceValue: balanceQty * (it.price || 0) };
+    });
+    const totals = perItem.reduce((acc, r) => {
+      acc.receivedQty += r.receivedQty; acc.receivedValue += r.receivedValue;
+      acc.issuedQty += r.issuedQty; acc.issuedValue += r.issuedValue;
+      acc.balanceQty += r.balanceQty; acc.balanceValue += r.balanceValue;
+      return acc;
+    }, {receivedQty:0, receivedValue:0, issuedQty:0, issuedValue:0, balanceQty:0, balanceValue:0});
+    const lowCount = perItem.filter(r => r.balanceQty <= r.item.minQty).length;
+    return { perItem, totals, lowCount, asOfDate };
+  }
+
+  function renderReport(){
+    const from = state.reportFrom || '';
+    const to = state.reportTo || '';
+    const data = computeReportData(from, to);
+
+    const filterBar =
+      '<div class="report-filter">' +
+        '<div class="field"><label>ตั้งแต่วันที่</label><input type="date" data-role="report-from" value="' + from + '"/></div>' +
+        '<div class="field"><label>ถึงวันที่</label><input type="date" data-role="report-to" value="' + to + '"/></div>' +
+        '<button type="button" class="btn" data-action="report-quick-month">เดือนนี้</button>' +
+        '<button type="button" class="btn" data-action="report-quick-7d">7 วันล่าสุด</button>' +
+        '<button type="button" class="btn" data-action="report-clear-range">ล้างช่วงวันที่</button>' +
+      '</div>';
+
+    const summary =
+      '<div class="report-stats">' +
+        '<div class="report-stat-card mint"><div class="rlbl">รับเข้ารวม (ช่วงที่เลือก)</div><div class="rnum">' + data.totals.receivedQty + '</div><div class="rsub">฿' + fmtMoney(data.totals.receivedValue) + '</div></div>' +
+        '<div class="report-stat-card coral"><div class="rlbl">เบิกออกรวม (ช่วงที่เลือก)</div><div class="rnum">' + data.totals.issuedQty + '</div><div class="rsub">฿' + fmtMoney(data.totals.issuedValue) + '</div></div>' +
+        '<div class="report-stat-card purple"><div class="rlbl">คงเหลือ ณ ' + fmtDate(data.asOfDate) + '</div><div class="rnum">' + data.totals.balanceQty + '</div><div class="rsub">฿' + fmtMoney(data.totals.balanceValue) + '</div></div>' +
+        '<div class="report-stat-card ' + (data.lowCount > 0 ? 'warn' : 'blue') + '"><div class="rlbl">รายการใกล้หมด ณ วันนั้น</div><div class="rnum">' + data.lowCount + '</div><div class="rsub">รายการ</div></div>' +
+      '</div>';
+
+    const rows = data.perItem.map(r =>
+      '<tr>' +
+        '<td><span class="item-code">' + escapeHtml(r.item.code || '—') + '</span></td>' +
+        '<td class="item-name">' + escapeHtml(r.item.name) + '</td>' +
+        '<td class="qty-val" style="color:var(--mint-text);">+' + r.receivedQty + '</td>' +
+        '<td class="qty-val" style="color:var(--coral-text);">-' + r.issuedQty + '</td>' +
+        '<td class="qty-val">' + r.balanceQty + '</td>' +
+        '<td class="value-val">฿' + fmtMoney(r.balanceValue) + '</td>' +
+      '</tr>'
+    ).join('');
+
+    const table = state.items.length === 0
+      ? '<div class="empty-state">ยังไม่มีรายการวัสดุในคลัง</div>'
+      : '<div class="sr-table-wrap"><table class="sr-table"><thead><tr>' +
+          '<th>รหัส</th><th>ชื่อวัสดุ</th><th>รับเข้าในช่วง</th><th>เบิกออกในช่วง</th><th>คงเหลือ ณ วันที่</th><th>มูลค่าคงเหลือ</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+
+    return '<div class="sr-panel">' +
+      '<h2 class="panel-title">แดชบอร์ดรายงาน</h2>' +
+      filterBar + summary +
+      '<div class="toolbar-row" style="margin-top:2px;">' +
+        '<div></div>' +
+        '<div class="export-buttons">' +
+          '<button type="button" class="btn" data-action="report-export-excel">📊 ส่งออก Excel</button>' +
+          '<button type="button" class="btn" data-action="report-export-pdf">🖨️ ส่งออก PDF</button>' +
+        '</div>' +
+      '</div>' +
+      table +
+    '</div>';
+  }
+
+  async function exportReportExcel(){
+    const data = computeReportData(state.reportFrom, state.reportTo);
+    if (data.perItem.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
+    try {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+    } catch(e){ showToast('โหลดไลบรารี Excel ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต', 'warn'); return; }
+    try {
+      const rows = data.perItem.map(r => ({
+        'รหัส': r.item.code || '',
+        'ชื่อวัสดุ': r.item.name,
+        'รับเข้า (จำนวน)': r.receivedQty,
+        'รับเข้า (มูลค่า)': r.receivedValue,
+        'เบิกออก (จำนวน)': r.issuedQty,
+        'เบิกออก (มูลค่า)': r.issuedValue,
+        'คงเหลือ ณ วันที่': r.balanceQty,
+        'มูลค่าคงเหลือ': r.balanceValue
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'รายงาน');
+      const fname = 'report-' + (state.reportFrom || 'start') + '_to_' + (state.reportTo || todayStr()) + '.xlsx';
+      XLSX.writeFile(wb, fname);
+      showToast('ส่งออก Excel แล้ว');
+    } catch(e){ showToast('ส่งออก Excel ไม่สำเร็จ', 'warn'); }
+  }
+
+  function exportReportPdf(){
+    const data = computeReportData(state.reportFrom, state.reportTo);
+    if (data.perItem.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
+
+    const rangeLabel = (state.reportFrom ? fmtDate(state.reportFrom) : 'เริ่มต้น') + ' — ' + (state.reportTo ? fmtDate(state.reportTo) : fmtDate(todayStr()));
+    const rowsHtml = data.perItem.map(r =>
+      '<tr>' +
+        '<td>' + escapeHtml(r.item.code || '-') + '</td>' +
+        '<td>' + escapeHtml(r.item.name) + '</td>' +
+        '<td class="num">' + r.receivedQty + '</td>' +
+        '<td class="num">' + r.issuedQty + '</td>' +
+        '<td class="num">' + r.balanceQty + '</td>' +
+        '<td class="num">' + fmtMoney(r.balanceValue) + '</td>' +
+      '</tr>'
+    ).join('');
+
+    const bodyHtml =
+      '<h1>แดชบอร์ดรายงานคงคลัง</h1>' +
+      '<div class="meta">ช่วงวันที่: ' + rangeLabel + ' · คงเหลือ ณ ' + fmtDate(data.asOfDate) + '</div>' +
+      '<div class="stat-row">' +
+        '<div class="stat-box"><div class="l">รับเข้ารวม</div><div class="v">' + data.totals.receivedQty + ' (฿' + fmtMoney(data.totals.receivedValue) + ')</div></div>' +
+        '<div class="stat-box"><div class="l">เบิกออกรวม</div><div class="v">' + data.totals.issuedQty + ' (฿' + fmtMoney(data.totals.issuedValue) + ')</div></div>' +
+        '<div class="stat-box"><div class="l">คงเหลือ ณ ' + fmtDate(data.asOfDate) + '</div><div class="v">' + data.totals.balanceQty + ' (฿' + fmtMoney(data.totals.balanceValue) + ')</div></div>' +
+        '<div class="stat-box"><div class="l">รายการใกล้หมด</div><div class="v">' + data.lowCount + ' รายการ</div></div>' +
+      '</div>' +
+      '<table><thead><tr><th>รหัส</th><th>ชื่อวัสดุ</th><th class="num">รับเข้า</th><th class="num">เบิกออก</th>' +
+      '<th class="num">คงเหลือ</th><th class="num">มูลค่าคงเหลือ</th></tr></thead>' +
+      '<tbody>' + rowsHtml + '</tbody></table>';
+
+    printReportHtml(bodyHtml);
+  }
+
+
 
   function setTab(tab, presetItem){
     state.tab = tab;
@@ -661,6 +838,7 @@
       ['receive','รับเข้า'],
       ['issue','ตัดออก'],
       ['history','ประวัติรายการ'],
+      ['report','แดชบอร์ดรายงาน'],
     ];
     return '<div class="sr-tabs">' + tabs.map(([k,label]) =>
       '<button class="sr-tab ' + (state.tab===k?'active':'') + '" data-tab="' + k + '">' + label + '</button>'
@@ -928,6 +1106,7 @@
     else if (state.tab === 'receive') panel = renderMoveForm('in');
     else if (state.tab === 'issue') panel = renderMoveForm('out');
     else if (state.tab === 'history') panel = renderHistory();
+    else if (state.tab === 'report') panel = renderReport();
 
     app.innerHTML =
       '<div class="sr-shell">' +
@@ -1100,6 +1279,29 @@
     app.querySelectorAll('[data-action="delete-tx"]').forEach(btn => {
       btn.addEventListener('click', () => deleteTransaction(btn.getAttribute('data-id')));
     });
+
+    const reportFromInput = app.querySelector('[data-role="report-from"]');
+    if (reportFromInput) reportFromInput.addEventListener('change', () => { state.reportFrom = reportFromInput.value; render(); });
+    const reportToInput = app.querySelector('[data-role="report-to"]');
+    if (reportToInput) reportToInput.addEventListener('change', () => { state.reportTo = reportToInput.value; render(); });
+
+    const reportQuickMonth = app.querySelector('[data-action="report-quick-month"]');
+    if (reportQuickMonth) reportQuickMonth.addEventListener('click', () => {
+      state.reportFrom = firstDayOfMonthStr(); state.reportTo = todayStr(); render();
+    });
+    const reportQuick7d = app.querySelector('[data-action="report-quick-7d"]');
+    if (reportQuick7d) reportQuick7d.addEventListener('click', () => {
+      const d = new Date(); d.setDate(d.getDate() - 6);
+      state.reportFrom = d.toISOString().slice(0,10); state.reportTo = todayStr(); render();
+    });
+    const reportClearRange = app.querySelector('[data-action="report-clear-range"]');
+    if (reportClearRange) reportClearRange.addEventListener('click', () => {
+      state.reportFrom = ''; state.reportTo = ''; render();
+    });
+    const reportExportExcelBtn = app.querySelector('[data-action="report-export-excel"]');
+    if (reportExportExcelBtn) reportExportExcelBtn.addEventListener('click', exportReportExcel);
+    const reportExportPdfBtn = app.querySelector('[data-action="report-export-pdf"]');
+    if (reportExportPdfBtn) reportExportPdfBtn.addEventListener('click', exportReportPdf);
 
     const resetBtn = app.querySelector('[data-action="reset-all"]');
     if (resetBtn) resetBtn.addEventListener('click', resetAll);
