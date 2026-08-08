@@ -125,6 +125,12 @@
     padding: 10px 14px; font-size: 13.5px; background: var(--surface-soft); color: var(--ink);
   }
   .search-wrap input:focus { outline: none; border-color: var(--purple); }
+  table.sr-table thead th.sortable { cursor: pointer; user-select: none; }
+  table.sr-table thead th.sortable:hover { color: var(--purple-text); }
+  table.sr-table thead th.sortable.active { color: var(--purple-text); }
+  .btn-urgency { background: var(--coral-bg); color: var(--coral-text); }
+  .btn-urgency:hover { background: var(--coral); color: #fff; }
+
   .export-buttons { display: flex; gap: 8px; flex-shrink: 0; }
   .export-buttons .btn { white-space: nowrap; }
 
@@ -166,6 +172,15 @@
   .icon-btn.out:hover { background: var(--coral); color: #fff; }
   .icon-btn.del { background: transparent; color: var(--ink-light); padding: 7px 9px; }
   .icon-btn.del:hover { color: var(--coral); }
+
+  .icon-btn.edit { background: var(--blue-bg); color: var(--blue-text); }
+  .icon-btn.edit:hover { background: var(--blue-text); color: #fff; }
+  .edit-input {
+    width: 100%; min-width: 70px; border: 1.5px solid var(--purple); border-radius: 8px;
+    padding: 6px 8px; font-size: 13px; background: #fff; color: var(--ink); font-family: var(--font-body);
+  }
+  .edit-input.num { font-family: var(--font-display); }
+  .edit-input:focus { outline: none; box-shadow: 0 0 0 2px var(--purple-bg); }
 
   .btn {
     border-radius: 12px; border: none; background: var(--surface-soft);
@@ -289,6 +304,9 @@
     showAddItem: false,
     presetItem: null,
     searchQuery: '',
+    sortField: null,
+    sortDir: 'asc',
+    editingId: null,
     toast: null,
   };
 
@@ -579,6 +597,47 @@
     state.tab = tab;
     state.presetItem = presetItem || null;
     state.showAddItem = false;
+    state.editingId = null;
+    render();
+  }
+
+  function enterEditMode(id){
+    state.editingId = id;
+    state.showAddItem = false;
+    render();
+  }
+
+  function cancelEdit(){
+    state.editingId = null;
+    render();
+  }
+
+  async function saveItemEdit(id){
+    const row = document.querySelector('[data-edit-row="' + id + '"]');
+    const item = itemById(id);
+    if (!row || !item) return;
+    const get = (f) => { const el = row.querySelector('[data-field="' + f + '"]'); return el ? el.value : ''; };
+
+    const name = (get('name') || '').trim();
+    if (!name) { showToast('กรุณากรอกชื่อวัสดุ', 'warn'); return; }
+    if (state.items.some(i => i.id !== id && i.name.toLowerCase() === name.toLowerCase())) {
+      showToast('มีชื่อวัสดุนี้อยู่แล้ว', 'warn'); return;
+    }
+    const code = (get('code') || '').trim();
+    if (code && state.items.some(i => i.id !== id && i.code.toLowerCase() === code.toLowerCase())) {
+      showToast('รหัสนี้ถูกใช้แล้ว กรุณาใช้รหัสอื่น', 'warn'); return;
+    }
+
+    item.code = code;
+    item.name = name;
+    item.unit = (get('unit') || 'ชิ้น').trim();
+    item.price = Math.max(0, Number(get('price')) || 0);
+    item.qty = Math.max(0, Math.round(Number(get('qty')) || 0));
+    item.minQty = Math.max(0, Math.round(Number(get('minQty')) || 0));
+
+    state.editingId = null;
+    try { await saveData(); showToast('บันทึกการแก้ไขแล้ว'); }
+    catch(e){ showToast('บันทึกไม่สำเร็จ', 'warn'); }
     render();
   }
 
@@ -609,13 +668,91 @@
     ).join('') + '</div>';
   }
 
+  function sortItems(items){
+    const field = state.sortField;
+    if (!field) return items;
+    const dir = state.sortDir === 'desc' ? -1 : 1;
+    const arr = items.slice();
+    arr.sort((a, b) => {
+      let av, bv;
+      switch(field){
+        case 'code': av = (a.code||'').toLowerCase(); bv = (b.code||'').toLowerCase(); break;
+        case 'name': av = a.name.toLowerCase(); bv = b.name.toLowerCase(); break;
+        case 'unit': av = (a.unit||'').toLowerCase(); bv = (b.unit||'').toLowerCase(); break;
+        case 'price': av = a.price || 0; bv = b.price || 0; break;
+        case 'qty': av = a.qty; bv = b.qty; break;
+        case 'value': av = a.qty * (a.price||0); bv = b.qty * (b.price||0); break;
+        case 'status': av = (a.qty <= a.minQty) ? 0 : 1; bv = (b.qty <= b.minQty) ? 0 : 1; break;
+        case 'urgency': av = a.qty - a.minQty; bv = b.qty - b.minQty; break;
+        default: return 0;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+    return arr;
+  }
+
+  function sortByUrgency(){
+    state.sortField = 'urgency';
+    state.sortDir = 'asc';
+    render();
+  }
+
+  function clearSort(){
+    state.sortField = null;
+    state.sortDir = 'asc';
+    render();
+  }
+
+  function handleSortClick(field){
+    if (state.sortField === field) {
+      state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.sortField = field;
+      state.sortDir = 'asc';
+    }
+    render();
+  }
+
+  function sortIndicator(field){
+    if (state.sortField !== field) return '';
+    return state.sortDir === 'asc' ? ' ▲' : ' ▼';
+  }
+
+  function sortableTh(label, field){
+    return '<th class="sortable' + (state.sortField===field?' active':'') + '" data-sort-field="' + field + '">' + label + sortIndicator(field) + '</th>';
+  }
+
   function computeVisibleItems(){
     const q = (state.searchQuery || '').trim().toLowerCase();
-    if (!q) return state.items;
-    return state.items.filter(i =>
+    const filtered = !q ? state.items.slice() : state.items.filter(i =>
       i.name.toLowerCase().includes(q) ||
       (i.code || '').toLowerCase().includes(q) ||
       (i.unit || '').toLowerCase().includes(q)
+    );
+    return sortItems(filtered);
+  }
+
+  function overviewEditRowHTML(it){
+    return (
+      '<tr data-edit-row="' + it.id + '">' +
+        '<td><label class="item-thumb-wrap" title="คลิกเพื่ออัปโหลด/เปลี่ยนรูป">' +
+          (it.image ? '<img src="' + it.image + '"/>' : '<div class="item-thumb-placeholder">📦</div>') +
+          '<input type="file" accept="image/*" data-action="upload-image" data-id="' + it.id + '" style="display:none"/>' +
+        '</label></td>' +
+        '<td><input class="edit-input" data-field="code" value="' + escapeHtml(it.code || '') + '"/></td>' +
+        '<td><input class="edit-input" data-field="name" value="' + escapeHtml(it.name) + '"/></td>' +
+        '<td><input class="edit-input" data-field="unit" value="' + escapeHtml(it.unit) + '"/></td>' +
+        '<td><input class="edit-input num" data-field="price" type="number" min="0" step="0.01" value="' + (it.price||0) + '"/></td>' +
+        '<td><input class="edit-input num" data-field="qty" type="number" min="0" value="' + it.qty + '"/></td>' +
+        '<td class="value-val">฿' + fmtMoney(it.qty * (it.price || 0)) + '</td>' +
+        '<td><input class="edit-input num" data-field="minQty" type="number" min="0" value="' + (it.minQty||0) + '" title="จำนวนขั้นต่ำแจ้งเตือน" placeholder="ขั้นต่ำ"/></td>' +
+        '<td><div class="row-actions">' +
+          '<button class="icon-btn in" data-action="save-item" data-id="' + it.id + '">บันทึก</button>' +
+          '<button class="icon-btn del" data-action="cancel-edit" data-id="' + it.id + '">ยกเลิก</button>' +
+        '</div></td>' +
+      '</tr>'
     );
   }
 
@@ -624,6 +761,7 @@
       return '<tr><td colspan="9"><div class="empty-state">ไม่พบวัสดุที่ตรงกับคำค้นหา</div></td></tr>';
     }
     return items.map(it => {
+      if (state.editingId === it.id) return overviewEditRowHTML(it);
       const low = it.qty <= it.minQty;
       const value = it.qty * (it.price || 0);
       return (
@@ -642,6 +780,7 @@
           '<td><div class="row-actions">' +
             '<button class="icon-btn in" data-action="quick-in" data-id="' + it.id + '">รับเข้า</button>' +
             '<button class="icon-btn out" data-action="quick-out" data-id="' + it.id + '">ตัดออก</button>' +
+            '<button class="icon-btn edit" data-action="edit-item" data-id="' + it.id + '" title="แก้ไขรายการ">แก้ไข</button>' +
             '<button class="icon-btn del" data-action="delete-item" data-id="' + it.id + '" title="ลบรายการวัสดุ">✕</button>' +
           '</div></td>' +
         '</tr>'
@@ -658,6 +797,8 @@
             'placeholder="ค้นหาชื่อ รหัส หรือหน่วยนับ..." value="' + escapeHtml(state.searchQuery || '') + '"/>' +
         '</div>' +
         '<div class="export-buttons">' +
+          '<button type="button" class="btn btn-urgency" data-action="sort-urgency">⚠️ เรียงใกล้หมดก่อน</button>' +
+          (state.sortField ? '<button type="button" class="btn" data-action="clear-sort">ล้างการเรียง</button>' : '') +
           '<button type="button" class="btn" data-action="export-excel">📊 ส่งออก Excel</button>' +
           '<button type="button" class="btn" data-action="export-pdf">🖨️ ส่งออก PDF</button>' +
         '</div>' +
@@ -666,7 +807,9 @@
     const table = state.items.length === 0
       ? '<div class="empty-state"><div class="big">ยังไม่มีรายการวัสดุในคลัง</div>เริ่มต้นด้วยการเพิ่มวัสดุชิ้นแรก</div>'
       : '<div class="sr-table-wrap"><table class="sr-table"><thead><tr>' +
-          '<th>รูป</th><th>รหัส</th><th>ชื่อวัสดุ</th><th>หน่วยนับ</th><th>ราคา/หน่วย</th><th>คงเหลือ</th><th>มูลค่ารวม</th><th>สถานะ</th><th>จัดการ</th>' +
+          '<th>รูป</th>' + sortableTh('รหัส','code') + sortableTh('ชื่อวัสดุ','name') + sortableTh('หน่วยนับ','unit') +
+          sortableTh('ราคา/หน่วย','price') + sortableTh('คงเหลือ','qty') + sortableTh('มูลค่ารวม','value') +
+          sortableTh('สถานะ','status') + '<th>จัดการ</th>' +
         '</tr></thead><tbody data-role="overview-tbody">' + overviewRowsHTML(visible) + '</tbody></table></div>';
 
     const addForm = state.showAddItem ? (
@@ -861,6 +1004,15 @@
     root.querySelectorAll('[data-action="delete-item"]').forEach(btn => {
       btn.addEventListener('click', () => deleteItem(btn.getAttribute('data-id')));
     });
+    root.querySelectorAll('[data-action="edit-item"]').forEach(btn => {
+      btn.addEventListener('click', () => enterEditMode(btn.getAttribute('data-id')));
+    });
+    root.querySelectorAll('[data-action="save-item"]').forEach(btn => {
+      btn.addEventListener('click', () => saveItemEdit(btn.getAttribute('data-id')));
+    });
+    root.querySelectorAll('[data-action="cancel-edit"]').forEach(btn => {
+      btn.addEventListener('click', cancelEdit);
+    });
     root.querySelectorAll('[data-action="upload-image"]').forEach(fileInput => {
       fileInput.addEventListener('change', async (e) => {
         const file = e.target.files && e.target.files[0];
@@ -893,6 +1045,14 @@
         }
       });
     }
+
+    app.querySelectorAll('[data-sort-field]').forEach(th => {
+      th.addEventListener('click', () => handleSortClick(th.getAttribute('data-sort-field')));
+    });
+    const sortUrgencyBtn = app.querySelector('[data-action="sort-urgency"]');
+    if (sortUrgencyBtn) sortUrgencyBtn.addEventListener('click', sortByUrgency);
+    const clearSortBtn = app.querySelector('[data-action="clear-sort"]');
+    if (clearSortBtn) clearSortBtn.addEventListener('click', clearSort);
 
     const exportExcelBtn = app.querySelector('[data-action="export-excel"]');
     if (exportExcelBtn) exportExcelBtn.addEventListener('click', exportExcel);
