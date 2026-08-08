@@ -346,9 +346,9 @@
 
   async function loadData(){
     try {
-      const res = await window.storage.get(STORAGE_KEY, false);
-      if (res && res.value) {
-        const parsed = JSON.parse(res.value);
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
         state.items = (parsed.items || []).map(i => ({price:0, code:'', image:'', ...i}));
         state.transactions = parsed.transactions || [];
       } else {
@@ -365,8 +365,7 @@
 
   async function saveData(){
     const payload = JSON.stringify({items: state.items, transactions: state.transactions});
-    const result = await window.storage.set(STORAGE_KEY, payload, false);
-    if (!result) throw new Error('save failed');
+    localStorage.setItem(STORAGE_KEY, payload);
   }
 
   function showToast(msg, kind){
