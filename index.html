@@ -63,6 +63,10 @@
     position:absolute; bottom:-60px; right:60px; width:100px; height:100px; border-radius:50%;
     background: var(--mint-bg); opacity:.6;
   }
+  .header-top-row { display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 1; margin-bottom: 4px; }
+  .refresh-btn { background: var(--surface-soft); font-size: 12.5px; padding: 7px 12px; }
+  .refresh-btn:hover { background: var(--purple-bg); color: var(--purple-text); }
+
   .sr-eyebrow {
     font-family: var(--font-display);
     font-size: 11px;
@@ -307,11 +311,27 @@
   .link-btn:hover { color: var(--coral-text); }
 </style>
 
+<script>
+  // ⚙️⚙️⚙️ ตั้งค่า Firebase ของคุณตรงนี้ ⚙️⚙️⚙️
+  // วิธีหาค่านี้: Firebase Console > (โปรเจกต์ของคุณ) > Project settings (ไอคอนเฟือง) >
+  // เลื่อนลงมาที่ "Your apps" > กด </> (Web app) > คัดลอกค่า firebaseConfig มาวางแทนด้านล่างนี้
+  window.__FIREBASE_CONFIG__ = {
+  apiKey: "AIzaSyDnK6WRc7IsShH02aBgmlIAHU1o6ZQKncs",
+  authDomain: "stock-office-supplies.firebaseapp.com",
+  projectId: "stock-office-supplies",
+  storageBucket: "stock-office-supplies.firebasestorage.app",
+  messagingSenderId: "121823320554",
+  appId: "1:121823320554:web:a7b90f9f03c42e09c07a93",
+  measurementId: "G-7R40WV730P"
+  };
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+
 <div id="stockroot"><div id="app"></div></div>
 
 <script>
 (function(){
-  const STORAGE_KEY = 'stock-data';
   const state = {
     items: [],
     transactions: [],
@@ -325,6 +345,7 @@
     reportFrom: firstDayOfMonthStr(),
     reportTo: todayStr(),
     editingId: null,
+    configured: false,
     toast: null,
   };
 
@@ -366,28 +387,62 @@
     ];
   }
 
-  async function loadData(){
+  const FIRESTORE_COLLECTION = 'stockroom';
+  const FIRESTORE_DOC = 'main';
+  let db = null;
+  let firebaseReady = false;
+
+  function initFirebase(){
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        state.items = (parsed.items || []).map(i => ({price:0, code:'', image:'', ...i}));
-        state.transactions = parsed.transactions || [];
+      const cfg = window.__FIREBASE_CONFIG__;
+      if (!window.firebase || !cfg || !cfg.apiKey || cfg.apiKey.indexOf('วางค่า') === 0) return false;
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
+      db = firebase.firestore();
+      firebaseReady = true;
+      return true;
+    } catch(e){ return false; }
+  }
+
+  function docRef(){ return db.collection(FIRESTORE_COLLECTION).doc(FIRESTORE_DOC); }
+
+  async function loadData(){
+    const ok = initFirebase();
+    state.configured = ok;
+    if (!ok) { state.loading = false; render(); return; }
+    try {
+      const snap = await docRef().get();
+      if (snap.exists) {
+        const data = snap.data() || {};
+        state.items = (data.items || []).map(i => ({price:0, code:'', image:'', ...i}));
+        state.transactions = data.transactions || [];
       } else {
         seedDefault();
-        await saveData();
+        try { await saveData(); } catch(e2){ /* doc will be created on next successful save */ }
       }
     } catch(e){
-      seedDefault();
-      try { await saveData(); } catch(e2){ /* ignore */ }
+      state.loading = false;
+      showToast('เชื่อมต่อฐานข้อมูลไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตหรือการตั้งค่า Firebase', 'warn');
+      render();
+      return;
     }
     state.loading = false;
     render();
   }
 
   async function saveData(){
-    const payload = JSON.stringify({items: state.items, transactions: state.transactions});
-    localStorage.setItem(STORAGE_KEY, payload);
+    if (!firebaseReady) throw new Error('ยังไม่ได้เชื่อมต่อฐานข้อมูล');
+    await docRef().set({
+      items: state.items,
+      transactions: state.transactions,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }
+
+  async function refreshData(){
+    state.loading = true;
+    render();
+    await loadData();
+    showToast('ดึงข้อมูลล่าสุดแล้ว');
   }
 
   function showToast(msg, kind){
@@ -1097,8 +1152,22 @@
     return '<div class="sr-shell"><div class="sr-panel" style="text-align:center;padding:60px;color:var(--ink-light);">กำลังโหลดข้อมูลคลังวัสดุ…</div></div>';
   }
 
+  function setupNeededHTML(){
+    return (
+      '<div class="sr-shell"><div class="sr-panel" style="text-align:center;padding:50px 24px;">' +
+        '<div class="panel-title" style="font-size:18px;margin-bottom:10px;">⚙️ ยังไม่ได้ตั้งค่าฐานข้อมูลกลาง (Firebase)</div>' +
+        '<p style="color:var(--ink-light);max-width:520px;margin:0 auto 6px;line-height:1.7;">' +
+          'เว็บนี้ต้องเชื่อมต่อกับ Firebase ก่อนถึงจะบันทึกและแชร์ข้อมูลระหว่างผู้ใช้ทุกคนได้ ' +
+          'กรุณาเปิดไฟล์ HTML แล้วใส่ค่า <code>window.__FIREBASE_CONFIG__</code> ที่ด้านบนสุดของไฟล์ ' +
+          'จากนั้นอัปโหลดขึ้น GitHub อีกครั้ง' +
+        '</p>' +
+      '</div></div>'
+    );
+  }
+
   function render(){
     const app = document.getElementById('app');
+    if (!state.configured) { app.innerHTML = setupNeededHTML(); return; }
     if (state.loading) { app.innerHTML = loadingHTML(); return; }
 
     let panel = '';
@@ -1111,7 +1180,10 @@
     app.innerHTML =
       '<div class="sr-shell">' +
         '<div class="sr-header">' +
-          '<div class="sr-eyebrow">Office Supply Stock</div>' +
+          '<div class="header-top-row">' +
+            '<div class="sr-eyebrow">Office Supply Stock · 🟢 ข้อมูลกลาง (Firebase)</div>' +
+            '<button type="button" class="btn refresh-btn" data-action="refresh-data">🔄 ดึงข้อมูลล่าสุด</button>' +
+          '</div>' +
           '<div class="sr-title">ระบบคุมสต็อกวัสดุอุปกรณ์สำนักงาน</div>' +
           statsHTML() +
         '</div>' +
@@ -1209,6 +1281,9 @@
     app.querySelectorAll('[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => setTab(btn.getAttribute('data-tab')));
     });
+
+    const refreshBtn = app.querySelector('[data-action="refresh-data"]');
+    if (refreshBtn) refreshBtn.addEventListener('click', refreshData);
 
     wireOverviewRows(app);
 
