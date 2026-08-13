@@ -307,6 +307,16 @@
   .sr-toast.warn { background: var(--coral); box-shadow: 0 8px 22px rgba(243,118,106,0.4); }
 
   .footer-row { display: flex; justify-content: flex-end; margin-top: 16px; }
+  .import-box {
+    margin-top: 14px; background: var(--surface-soft); border-radius: 16px; padding: 16px;
+  }
+  .import-label { display: block; font-size: 12px; font-weight: 600; color: var(--ink-light); margin-bottom: 8px; }
+  .import-textarea {
+    width: 100%; border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px;
+    font-family: 'Consolas', 'Menlo', monospace; font-size: 12px; background: #fff; color: var(--ink); resize: vertical;
+  }
+  .import-textarea:focus { outline: none; border-color: var(--purple); }
+  .import-actions { display: flex; gap: 8px; margin-top: 10px; }
   .link-btn { background: none; border: none; color: var(--ink-light); font-size: 12px; text-decoration: underline; }
   .link-btn:hover { color: var(--coral-text); }
 </style>
@@ -316,7 +326,7 @@
   // วิธีหาค่านี้: Firebase Console > (โปรเจกต์ของคุณ) > Project settings (ไอคอนเฟือง) >
   // เลื่อนลงมาที่ "Your apps" > กด </> (Web app) > คัดลอกค่า firebaseConfig มาวางแทนด้านล่างนี้
   window.__FIREBASE_CONFIG__ = {
-  apiKey: "AIzaSyDnK6WRc7IsShH02aBgmlIAHU1o6ZQKncs",
+    apiKey: "AIzaSyDnK6WRc7IsShH02aBgmlIAHU1o6ZQKncs",
   authDomain: "stock-office-supplies.firebaseapp.com",
   projectId: "stock-office-supplies",
   storageBucket: "stock-office-supplies.firebasestorage.app",
@@ -346,6 +356,7 @@
     reportTo: todayStr(),
     editingId: null,
     configured: false,
+    showImport: false,
     toast: null,
   };
 
@@ -566,6 +577,22 @@
     if (!confirm('รีเซ็ตข้อมูลทั้งหมดกลับเป็นค่าตัวอย่าง?')) return;
     seedDefault();
     try { await saveData(); showToast('รีเซ็ตข้อมูลแล้ว'); } catch(e){}
+    render();
+  }
+
+  async function importLegacyData(raw){
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch(e){ showToast('ข้อมูลที่วางไม่ใช่ JSON ที่ถูกต้อง ตรวจสอบว่าคัดลอกมาครบหรือไม่', 'warn'); return; }
+    if (!parsed || !Array.isArray(parsed.items)) {
+      showToast('รูปแบบข้อมูลไม่ถูกต้อง (ต้องมี items เป็น array)', 'warn'); return;
+    }
+    if (!confirm('นำเข้า ' + parsed.items.length + ' รายการวัสดุ และแทนที่ข้อมูลปัจจุบันทั้งหมดใน Firebase ใช่หรือไม่? การกระทำนี้ย้อนกลับไม่ได้')) return;
+    state.items = parsed.items.map(i => ({price:0, code:'', image:'', ...i}));
+    state.transactions = parsed.transactions || [];
+    state.showImport = false;
+    try { await saveData(); showToast('นำเข้าข้อมูล ' + state.items.length + ' รายการสำเร็จ! บันทึกขึ้น Firebase แล้ว'); }
+    catch(e){ showToast('บันทึกขึ้น Firebase ไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองใหม่', 'warn'); }
     render();
   }
 
@@ -1069,8 +1096,22 @@
       '</form>'
     ) : '<button class="add-row-btn" data-action="show-add-item">+ เพิ่มวัสดุใหม่</button>';
 
-    return '<div class="sr-panel"><h2 class="panel-title">คงเหลือปัจจุบัน</h2>' + toolbar + table + addForm +
-      '<div class="footer-row"><button class="link-btn" data-action="reset-all">รีเซ็ตข้อมูลตัวอย่าง</button></div></div>';
+    const importBox = state.showImport ? (
+      '<div class="import-box">' +
+        '<label class="import-label">วางข้อมูล JSON ที่คัดลอกมาจากเครื่องเดิม (ผลลัพธ์จากคำสั่ง copy(localStorage.getItem(\'stock-data\')))</label>' +
+        '<textarea data-role="import-textarea" rows="5" class="import-textarea" placeholder=\'{"items":[...],"transactions":[...]}\'></textarea>' +
+        '<div class="import-actions">' +
+          '<button type="button" class="btn btn-primary" data-action="do-import">นำเข้าและบันทึกไปยัง Firebase</button>' +
+          '<button type="button" class="btn" data-action="cancel-import">ยกเลิก</button>' +
+        '</div>' +
+      '</div>'
+    ) : '';
+
+    return '<div class="sr-panel"><h2 class="panel-title">คงเหลือปัจจุบัน</h2>' + toolbar + table + addForm + importBox +
+      '<div class="footer-row" style="justify-content:space-between;">' +
+        '<button class="link-btn" data-action="show-import">📥 นำเข้าข้อมูลจากเครื่องเก่า (localStorage)</button>' +
+        '<button class="link-btn" data-action="reset-all">รีเซ็ตข้อมูลตัวอย่าง</button>' +
+      '</div></div>';
   }
 
   function renderMoveForm(type){
@@ -1380,6 +1421,16 @@
 
     const resetBtn = app.querySelector('[data-action="reset-all"]');
     if (resetBtn) resetBtn.addEventListener('click', resetAll);
+
+    const showImportBtn = app.querySelector('[data-action="show-import"]');
+    if (showImportBtn) showImportBtn.addEventListener('click', () => { state.showImport = true; render(); });
+    const cancelImportBtn = app.querySelector('[data-action="cancel-import"]');
+    if (cancelImportBtn) cancelImportBtn.addEventListener('click', () => { state.showImport = false; render(); });
+    const doImportBtn = app.querySelector('[data-action="do-import"]');
+    if (doImportBtn) doImportBtn.addEventListener('click', () => {
+      const ta = app.querySelector('[data-role="import-textarea"]');
+      importLegacyData(ta ? ta.value : '');
+    });
   }
 
   loadData();
